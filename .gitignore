@@ -20,5 +20,6 @@ vscode.db
 /cli/openssl
 product.overrides.json
 *.snap.actual
+.env
 .vscode-test
 
