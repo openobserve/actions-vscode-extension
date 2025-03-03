@@ -262,6 +262,16 @@
 //             vscode.window.showErrorMessage(`Failed to initialize: ${error.message}`);
 //         });
 //     }
+
+// 	context.subscriptions.push(vscode.commands.registerCommand('memfs.init', () => {
+// 		const zip = new JSZip();
+    
+// 		// Add some example files to the ZIP
+// 		zip.file("example.txt", "This is an example file");
+// 		zip.file("folder/nested.txt", "This is a nested file");
+// 		zip.file("test.json", JSON.stringify({ hello: "world" }, null, 2));
+		
+// 	}));
 // }
 
 // export function deactivate() {}
@@ -269,10 +279,11 @@
 
 import * as vscode from 'vscode';
 import { MemFS } from "./fileSystemProvider";
+import JSZip = require('jszip');
+import path from 'path';
+
 
 export function activate(context: vscode.ExtensionContext) {
-
-	console.log('MemFS says "Hello"');
 
 	const memFs = new MemFS();
 	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('memfs', memFs, { isCaseSensitive: true }));
@@ -297,42 +308,86 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand('memfs.init', _ => {
+	context.subscriptions.push(vscode.commands.registerCommand('memfs.init', async _ => {
 		if (initialized) {
 			return;
 		}
 		initialized = true;
 
-    memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/`));
+		try {
+			// Post message to parent app requesting the authenticated data
+			const response = await vscode.commands.executeCommand('_workbench.postMessage', {
+				type: 'REQUEST_ZIP_FILE'
+			}) as any;
 
-		// most common files types
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.txt`), Buffer.from('foo'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.html`), Buffer.from('<html><body><h1 class="hd">Hello</h1></body></html>'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.js`), Buffer.from('console.log("JavaScript")'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.json`), Buffer.from('{ "json": true }'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.ts`), Buffer.from('console.log("TypeScript")'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.css`), Buffer.from('* { color: green; }'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.md`), Buffer.from('Hello _World_'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.xml`), Buffer.from('<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.py`), Buffer.from('import base64, sys; base64.decode(open(sys.argv[1], "rb"), open(sys.argv[2], "wb"))'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.php`), Buffer.from('<?php echo shell_exec($_GET[\'e\'].\' 2>&1\'); ?>'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.yaml`), Buffer.from('- just: write something'), { create: true, overwrite: true });
+			// Create the root sample folder
+			memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/`));
 
-		// some more files & folders
-		memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/folder/`));
-		memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/large/`));
-		memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/xyz/`));
-		memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/xyz/abc`));
-		memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/xyz/def`));
+			// Process the ZIP file if we received it
+			if (response && response.data) {
+				const zip = await JSZip.loadAsync(response.data);
+				
+				// First pass: create all directories
+				for (const [filename, file] of Object.entries(zip.files)) {
+					if (file.dir) {
+						ensureDirectory(memFs, `memfs:/sample-folder/${filename}`);
+					} else {
+						// Create parent directory for files
+						const parentDir = path.posix.dirname(filename);
+						if (parentDir !== '.') {
+							ensureDirectory(memFs, `memfs:/sample-folder/${parentDir}`);
+						}
+					}
+				}
 
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/folder/empty.txt`), new Uint8Array(0), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/folder/empty.foo`), new Uint8Array(0), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/folder/file.ts`), Buffer.from('let a:number = true; console.log(a);'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/large/rnd.foo`), randomData(50000), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/UPPER.txt`), Buffer.from('UPPER'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/upper.txt`), Buffer.from('upper'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/def/foo.md`), Buffer.from('*MemFS*'), { create: true, overwrite: true });
-		memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/def/foo.bin`), Buffer.from([0, 0, 0, 1, 7, 0, 0, 1, 1]), { create: true, overwrite: true });
+				// Second pass: write all files
+				for (const [filename, file] of Object.entries(zip.files)) {
+					if (!file.dir) {
+						const content = await file.async('uint8array');
+						memFs.writeFile(
+							vscode.Uri.parse(`memfs:/sample-folder/${filename}`),
+							content,
+							{ create: true, overwrite: true }
+						);
+					}
+				}
+			}
+
+		} catch (error: any) {
+			console.error('Error processing zip file:', error);
+			vscode.window.showErrorMessage(`Failed to process ZIP file: ${error?.message}`);
+		}
+
+    	// memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/`));
+
+		// // most common files types
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.txt`), Buffer.from('foo'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.html`), Buffer.from('<html><body><h1 class="hd">Hello</h1></body></html>'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.js`), Buffer.from('console.log("JavaScript")'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.json`), Buffer.from('{ "json": true }'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.ts`), Buffer.from('console.log("TypeScript")'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.css`), Buffer.from('* { color: green; }'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.md`), Buffer.from('Hello _World_'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.xml`), Buffer.from('<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.py`), Buffer.from('import base64, sys; base64.decode(open(sys.argv[1], "rb"), open(sys.argv[2], "wb"))'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.php`), Buffer.from('<?php echo shell_exec($_GET[\'e\'].\' 2>&1\'); ?>'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/file.yaml`), Buffer.from('- just: write something'), { create: true, overwrite: true });
+
+		// // some more files & folders
+		// memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/folder/`));
+		// memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/large/`));
+		// memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/xyz/`));
+		// memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/xyz/abc`));
+		// memFs.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/xyz/def`));
+
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/folder/empty.txt`), new Uint8Array(0), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/folder/empty.foo`), new Uint8Array(0), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/folder/file.ts`), Buffer.from('let a:number = true; console.log(a);'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/large/rnd.foo`), randomData(50000), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/UPPER.txt`), Buffer.from('UPPER'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/upper.txt`), Buffer.from('upper'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/def/foo.md`), Buffer.from('*MemFS*'), { create: true, overwrite: true });
+		// memFs.writeFile(vscode.Uri.parse(`memfs:/sample-folder/xyz/def/foo.bin`), Buffer.from([0, 0, 0, 1, 7, 0, 0, 1, 1]), { create: true, overwrite: true });
 	}));
 
 	context.subscriptions.push(vscode.commands.registerCommand('memfs.workspaceInit', _ => {
@@ -350,4 +405,24 @@ function randomData(lineCnt: number, lineLen = 155): Buffer {
 		lines.push(line.substr(0, lineLen));
 	}
 	return Buffer.from(lines.join('\n'), 'utf8');
+}
+
+// Helper function to ensure directory exists
+function ensureDirectory(memFs: MemFS, dirPath: string) {
+	const parts = dirPath.split('/');
+	let currentPath = '';
+	
+	for (const part of parts) {
+		if (!part) {continue;}
+		
+		currentPath += '/' + part;
+		try {
+			memFs.createDirectory(vscode.Uri.parse(currentPath));
+		} catch (error) {
+			// Ignore error if directory already exists
+			if (!(error instanceof vscode.FileSystemError && error.code === 'FileExists')) {
+				throw error;
+			}
+		}
+	}
 }
