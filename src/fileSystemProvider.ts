@@ -59,11 +59,13 @@ export class MemFS implements vscode.FileSystemProvider {
 
 	id: string;
 	root: Directory;
+	folderName: string;
 
-	constructor(id: string) {
+	constructor(id: string, folderName: string) {
 		this.id = id;
 		console.log("constructor create new directory", id);
 		this.root = new Directory(vscode.Uri.parse('memfs:/'), '');
+		this.folderName = folderName;
 	}
 
 	private dbName = 'memfsCache';
@@ -118,33 +120,33 @@ export class MemFS implements vscode.FileSystemProvider {
 				for (const [path, file] of Object.entries(zip.files)) {
 					// Skip the root sample-folder itself
 					console.log("path", path, file);
-					if (path === 'sample-folder/' || path === 'sample-folder') {
+					if (path === `${this.folderName}/` || path === `${this.folderName}`) {
 						continue;
 					}
 
 					// Remove the leading 'sample-folder/' if it exists
-					const normalizedPath = path.startsWith('sample-folder/')
-						? path.substring('sample-folder/'.length)
+					const normalizedPath = path.startsWith(`${this.folderName}/`)
+						? path.substring(`${this.folderName}/`.length)
 						: path;
 
 
 					if (file.dir) {
 						const parentPath = getDirname(normalizedPath);
-						console.log("creating directory", 'uri', vscode.Uri.parse(`memfs:/sample-folder/${parentPath}`), 'normalizedPath', parentPath);
-						this.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/${parentPath}`));
+						console.log("creating directory", 'uri', vscode.Uri.parse(`memfs:/${this.folderName}/${parentPath}`), 'normalizedPath', parentPath);
+						this.createDirectory(vscode.Uri.parse(`memfs:/${this.folderName}/${parentPath}`));
 					} else {
 						// Create parent directory if needed
 						console.log("creating parent directory", 'normalizedPath', normalizedPath);
 						const parentPath = getDirname(normalizedPath);
 						if (parentPath && parentPath !== '/') {
-							console.log("creating parent directory", 'uri', vscode.Uri.parse(`memfs:/sample-folder/${parentPath}`), 'parentPath', parentPath);
-							this.createDirectory(vscode.Uri.parse(`memfs:/sample-folder/${parentPath}`));
+							console.log("creating parent directory", 'uri', vscode.Uri.parse(`memfs:/${this.folderName}/${parentPath}`), 'parentPath', parentPath);
+							this.createDirectory(vscode.Uri.parse(`memfs:/${this.folderName}/${parentPath}`));
 						}
 
 						const content = await file.async('uint8array');
-						console.log("writing file", 'uri', vscode.Uri.parse(`memfs:/sample-folder/${normalizedPath}`), 'normalizedPath', normalizedPath);
+						console.log("writing file", 'uri', vscode.Uri.parse(`memfs:/${this.folderName}/${normalizedPath}`), 'normalizedPath', normalizedPath);
 						this.writeFile(
-							vscode.Uri.parse(`memfs:/sample-folder/${normalizedPath}`),
+							vscode.Uri.parse(`memfs:/${this.folderName}/${normalizedPath}`),
 							content,
 							{ create: true, overwrite: true }
 						);
@@ -169,7 +171,7 @@ export class MemFS implements vscode.FileSystemProvider {
 					console.log("adding to zip", name, entry);
 
 					// Skip the root sample-folder
-					if (currentPath === '' && name === 'sample-folder') {
+					if (currentPath === '' && name === `${this.folderName}`) {
 						// Instead of skipping entirely, we'll add its contents
 						if (entry instanceof Directory) {
 							addToZip(entry, '');  // Start with empty path for sample-folder contents
@@ -440,7 +442,7 @@ export class MemFS implements vscode.FileSystemProvider {
 		const parts = uri.path.split('/');
 		let entry: Entry | undefined = this.root;
 
-		if (uri.toString().includes('sample-folder')) {console.log("lookup ----", uri, parts, entry, entry instanceof Directory, entry instanceof Directory && entry.entries);}
+		if (uri.toString().includes(`${this.folderName}`)) {console.log("lookup ----", uri, parts, entry, entry instanceof Directory, entry instanceof Directory && entry.entries);}
 		for (const part of parts) {
 			if (!part) {
 				continue;
