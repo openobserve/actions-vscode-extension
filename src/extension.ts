@@ -31,6 +31,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			console.error('Error loading files:', error);
 		}
 	}
+
+
+	context.subscriptions.push(vscode.commands.registerCommand('openobserve.action.deploy', async () => {
+		// Get the zip file from the memfs
+		const zipBlob = new Blob([await memFs.getZipFile()], { type: 'application/zip' });
+		const formData = new FormData();
+		formData.append('file', zipBlob, 'Archive.zip');
+
+		// Upload the zip file to the API
+		vscode.window.showInformationMessage('Uploading action...!');
+		// const response = await fetch('https://main.dev.zinclabs.dev/api/default/actions/upload', {
+		// 	method: 'POST',
+		// 	body: formData,
+		// });
+	}));
 }
 
 // Function to fetch and load files into memfs

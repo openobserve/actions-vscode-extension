@@ -92,6 +92,47 @@ export class MemFS implements vscode.FileSystemProvider {
 		return content || new Uint8Array();
 	}
 
+
+	async getZipFile(): Promise<Uint8Array> {
+		try {
+			const zip = new JSZip();
+
+			// Helper function to recursively add directory contents to zip
+			const addToZip = (dir: Directory, currentPath: string = '') => {
+				for (const [name, entry] of dir.entries) {
+					console.log("adding to zip", name, entry);
+
+					// Skip the root sample-folder
+					if (currentPath === '' && name === `${this.folderName}`) {
+						// Instead of skipping entirely, we'll add its contents
+						if (entry instanceof Directory) {
+							addToZip(entry, '');  // Start with empty path for sample-folder contents
+						}
+						continue;
+					}
+
+					const entryPath = currentPath ? `${currentPath}/${name}` : name;
+					if (entry instanceof Directory) {
+						zip.folder(entryPath);
+						addToZip(entry, entryPath);
+					} else if (entry instanceof File && entry.data) {
+						zip.file(entryPath, entry.data);
+					}
+				}
+			};
+
+			// Add all files to zip
+			addToZip(this.root);
+
+			// Generate zip content
+			return await zip.generateAsync({ type: 'uint8array' });
+		} catch (error) {
+			console.error("Failed to get zip file", error);
+			throw error;
+		}
+	}
+
+
 	async loadWorkspaceFromCache(): Promise<boolean> {
 		try {
 			const db = await this.openDB();
@@ -163,37 +204,7 @@ export class MemFS implements vscode.FileSystemProvider {
 
 	private async updateWorkspaceCache(): Promise<void> {
 		try {
-			const zip = new JSZip();
-
-			// Helper function to recursively add directory contents to zip
-			const addToZip = (dir: Directory, currentPath: string = '') => {
-				for (const [name, entry] of dir.entries) {
-					console.log("adding to zip", name, entry);
-
-					// Skip the root sample-folder
-					if (currentPath === '' && name === `${this.folderName}`) {
-						// Instead of skipping entirely, we'll add its contents
-						if (entry instanceof Directory) {
-							addToZip(entry, '');  // Start with empty path for sample-folder contents
-						}
-						continue;
-					}
-
-					const entryPath = currentPath ? `${currentPath}/${name}` : name;
-					if (entry instanceof Directory) {
-						zip.folder(entryPath);
-						addToZip(entry, entryPath);
-					} else if (entry instanceof File && entry.data) {
-						zip.file(entryPath, entry.data);
-					}
-				}
-			};
-
-			// Add all files to zip
-			addToZip(this.root);
-
-			// Generate zip content
-			const zipContent = await zip.generateAsync({ type: 'uint8array' });
+			const zipContent = await this.getZipFile();
 			const hash = await this.generateHash(zipContent);
 			// Save to IndexedDB
 			const db = await this.openDB();
@@ -226,87 +237,7 @@ export class MemFS implements vscode.FileSystemProvider {
 		}
 	}
 
-
-	private async updateCache(uri: vscode.Uri, content: Uint8Array): Promise<void> {
-		try {
-			const hash = await this.generateHash(content);
-			const zippedContent = await this.zipContent(content);
-
-			const db = await this.openDB();
-			const transaction = db.transaction(this.storeName, 'readwrite');
-			const store = transaction.objectStore(this.storeName);
-
-			const record: FileRecord = {
-				id: this.id,
-				hash,
-				data: zippedContent,
-				timestamp: Date.now(),
-			};
-			// Remove all existing records for this path
-			const pathIndex = store.index('path');
-			const existingKey = await new Promise((resolve, reject) => {
-				const request = pathIndex.getKey(uri.toString());
-				request.onsuccess = () => {
-					console.log("success existingKey", request.result);
-					resolve(request.result);
-				};
-
-				request.onerror = () => {
-					console.log("existingKey error", request.error);
-					reject(request.error);
-				};
-			});
-
-			console.log("existingKey", existingKey);
-
-			if (existingKey !== undefined) {
-				store.delete(existingKey as unknown as IDBValidKey);
-			}
-
-			await new Promise((resolve, reject) => {
-				const request = store.put(record);
-				request.onsuccess = () => {
-					console.log("success put", request.result);
-					resolve(request.result);
-				};
-
-				request.onerror = () => {
-					console.log("put error", request.error);
-					reject(request.error);
-				};
-			});
-		} catch (error) {
-			console.log("Failed to update cache", error);
-			throw error;
-		}
-	}
-
-	private async getFromCache(uri: vscode.Uri): Promise<Uint8Array | undefined> {
-		try {
-			const db = await this.openDB();
-			// console.log("db", uri, db);
-			const transaction = (await db).transaction(this.storeName, 'readonly');
-			const store = transaction.objectStore(this.storeName);
-			const pathIndex = store.index('path');
-
-			const record = await pathIndex.get(uri.toString());
-
-			if (record) {
-				return await this.unzipContent((record as unknown as FileRecord).data);
-			}
-
-			return undefined;
-		} catch (error) {
-			// console.log("Failed to get from cache", error);
-			return undefined;
-		}
-
-
-	}
-
-
 	// IndexDB operations
-
 	private async openDB(): Promise<IDBDatabase> {
 		return new Promise((resolve, reject) => {
 			const request = indexedDB.open(this.dbName, 1);
