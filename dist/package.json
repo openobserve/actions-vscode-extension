@@ -1,22 +1,17 @@
 {
-  "name": "openobserve",
-  "displayName": "openobserve",
+  "name": "openobserve-web-vscode",
+  "displayName": "openobserve-web-vscode",
   "description": "Actions",
   "version": "0.0.1",
+  "publisher": "openobserve",
   "engines": {
-    "vscode": "^1.97.0"
+    "vscode": "^1.48.0"
   },
-  "categories": [
-    "Other"
-  ],
   "activationEvents": [
-    "onFileSystem:memfs"
+    "onFileSystem:memfs",
+    "onDebug"
   ],
-  "main": "./extension.js",
-  "extensionKind": [
-    "ui",
-    "workspace"
-  ],
+  "browser": "./dist/extension.js",
   "contributes": {
     "viewsWelcome": [
       {
