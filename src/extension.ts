@@ -13,7 +13,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		return;
 	}
 
-	let folderName = id; // Dynamic folder name
+	let folderName = id;
+
+	const action = await getActionById(id);
+
+	console.log("action --------------", action);
+
+	if (action?.name) {
+		folderName = action.name;
+	}
 
 	// Register the memfs provider early
 	const memFs = new MemFS(id, folderName);
@@ -46,6 +54,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		// 	body: formData,
 		// });
 	}));
+}
+
+async function getActionById(id: string) {
+	const response = await fetch(`https://main.dev.zinclabs.dev/api/default/actions/${id}`, {
+		method: 'GET',
+		credentials: 'include',
+	});
+
+	const data = await response.json();
+	return data;
 }
 
 // Function to fetch and load files into memfs
