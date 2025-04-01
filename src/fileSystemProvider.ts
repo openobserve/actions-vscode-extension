@@ -60,7 +60,7 @@ export class MemFS implements vscode.FileSystemProvider {
 	id: string;
 	root: Directory;
 	folderName: string;
-
+	
 	constructor(id: string, folderName: string) {
 		this.id = id;
 		console.log("constructor create new directory", id);

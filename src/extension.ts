@@ -7,13 +7,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	console.log("Activating Extension...");
 
 	let id = context.workspaceState.get('actionId') as string;
+	let folderName = (context.workspaceState.get('actionName') || 'Untitled') as string;
 
 	if (!id) {
 		console.error("No action ID found");
 		return;
 	}
-
-	let folderName = id;
 
 	const action = await getActionById(id);
 
