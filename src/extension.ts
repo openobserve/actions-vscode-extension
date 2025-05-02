@@ -3,20 +3,55 @@ import * as vscode from 'vscode';
 import { MemFS } from "./fileSystemProvider";
 import JSZip from 'jszip';
 
-export async function activate(context: vscode.ExtensionContext) {
-	console.log("Activating Extension...");
 
+let API_ORIGIN = ''; 
+let ORG_IDENTIFIER = '';
+let HTTP_PROTOCOL = '';
+export async function activate(context: vscode.ExtensionContext) {
 	let id = context.workspaceState.get('actionId') as string;
 	let folderName = (context.workspaceState.get('actionName') || 'Untitled') as string;
+
+
+	let origin = context.workspaceState.get('origin') as string;
+
+	try {
+		origin.split('?')[1].split('&').forEach((key: any) => {
+			const query = key.split('=');
+				if (query[0] === 'id') {
+		  		id = query[1];
+			}
+	
+			if (query[0] === 'name') {
+				folderName = query[1];
+			}
+
+			if (query[0] === 'org_identifier') {
+				ORG_IDENTIFIER = query[1];
+			}
+	  	});
+
+		API_ORIGIN = origin.split('/')[2];
+		HTTP_PROTOCOL = origin.split(':')[0];
+
+	} catch (error) {
+		console.error("Error parsing origin:", error);
+	}
+
+	console.log( "id:" ,id, "folderName:" ,folderName, "org_identifier:" ,ORG_IDENTIFIER, "api_origin:" ,API_ORIGIN, "http_protocol:" ,HTTP_PROTOCOL);
+
+
+
 
 	if (!id) {
 		console.error("No action ID found");
 		return;
 	}
 
-	const action = await getActionById(id);
+	let action;
 
-	console.log("action --------------", action);
+	if (id !== 'untitled') {
+		action = await getActionById(id);
+	}
 
 	if (action?.name) {
 		folderName = action.name;
@@ -29,13 +64,24 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Ensure workspace folder is created
 	memFs.createDirectory(vscode.Uri.parse(`memfs:/${folderName}`));
 
+
+
 	// Load existing files if present
-	const loaded = await memFs.loadWorkspaceFromCache();
-	if (!loaded) {
+	if (id === 'untitled') {
 		try {
-			await loadFilesFromApi(id, memFs, folderName);
+			const fileUri = vscode.Uri.parse(`memfs:/${folderName}/main.py`);
+			memFs.writeFile(fileUri, new TextEncoder().encode(''), { create: true, overwrite: true });
 		} catch (error) {
-			console.error('Error loading files:', error);
+			console.error('Error creating main.py:', error);
+		}
+	} else {
+		const loaded = await memFs.loadWorkspaceFromCache();
+		if (!loaded) {
+			try {
+				await loadFilesFromApi(id, memFs, folderName);
+			} catch (error) {
+				console.error('Error loading files:', error);
+			}
 		}
 	}
 
@@ -46,17 +92,24 @@ export async function activate(context: vscode.ExtensionContext) {
 		const formData = new FormData();
 		formData.append('file', zipBlob, 'Archive.zip');
 
-		// Upload the zip file to the API
-		vscode.window.showInformationMessage('Uploading action...!');
-		// const response = await fetch('https://main.dev.zinclabs.dev/api/default/actions/upload', {
-		// 	method: 'POST',
-		// 	body: formData,
-		// });
+		// Show a temporary status bar message
+		const disposable = vscode.window.setStatusBarMessage('Uploading action...'); // Disappears after 2 seconds
+		
+		try {
+			await uploadAction(id, memFs, folderName);
+			// Show success message in status bar that disappears after 3 seconds
+			vscode.window.setStatusBarMessage('Action uploaded successfully!', 3000);
+		} catch (error) {
+			// Show an error notification if something goes wrong
+			vscode.window.showErrorMessage('Failed to upload action');
+		} finally {
+			disposable.dispose();	
+		}
 	}));
 }
 
 async function getActionById(id: string) {
-	const response = await fetch(`https://main.dev.zinclabs.dev/api/default/actions/${id}`, {
+	const response = await fetch(`${HTTP_PROTOCOL}://${API_ORIGIN}/api/${ORG_IDENTIFIER}/actions/${id}`, {
 		method: 'GET',
 		credentials: 'include',
 	});
@@ -67,7 +120,7 @@ async function getActionById(id: string) {
 
 // Function to fetch and load files into memfs
 async function loadFilesFromApi(id: string, memFs: MemFS, folderName: string) {
-	const response = await fetch(`https://main.dev.zinclabs.dev/api/default/actions/download/${id}`, {
+	const response = await fetch(`${HTTP_PROTOCOL}://${API_ORIGIN}/api/${ORG_IDENTIFIER}/actions/download/${id}`, {
 		method: 'GET',
 		credentials: 'include',
 		headers: {
@@ -87,5 +140,23 @@ async function loadFilesFromApi(id: string, memFs: MemFS, folderName: string) {
 			const content = await file.async('uint8array');
 			memFs.writeFile(fileUri, content, { create: true, overwrite: true });
 		}
+	}
+}
+
+async function uploadAction(id: string, memFs: MemFS, folderName: string) {
+	const zipBlob = new Blob([await memFs.getZipFile()], { type: 'application/zip' });
+	const formData = new FormData();
+	formData.append('file', zipBlob);
+	formData.append('filename', (zipBlob as File).name || "");
+
+	try {
+		await fetch(`${HTTP_PROTOCOL}://${API_ORIGIN}/api/${ORG_IDENTIFIER}/actions/${id}`, {
+			method: 'PUT',
+			body: formData,
+			credentials: 'include',
+		});
+	} catch (error) {
+		console.error('Error uploading action:', error);
+		return null;
 	}
 }
